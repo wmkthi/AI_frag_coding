@@ -201,7 +201,6 @@ with left:
         value=_safe_text(df.loc[idx, "previous_conversation"]),
         height=220,
         disabled=True,
-        key="ta_prev",
     )
 
     st.markdown("#### current_user_turn")
@@ -210,7 +209,6 @@ with left:
         value=_safe_text(df.loc[idx, "current_user_turn"]),
         height=160,
         disabled=True,
-        key="ta_user",
     )
 
     st.markdown("#### ai_response")
@@ -219,7 +217,6 @@ with left:
         value=_safe_text(df.loc[idx, "ai_response"]),
         height=220,
         disabled=True,
-        key="ta_ai",
     )
 
     if "Notes" in df.columns:
