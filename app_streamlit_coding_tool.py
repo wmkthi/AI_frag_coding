@@ -257,7 +257,7 @@ for row_cols in (LABEL_COLS[:half], LABEL_COLS[half:]):
                 c,
                 options=LABEL_OPTIONS,
                 key=f"in_{c}",
-                format_func=lambda v: "—" if v == "" else v,
+                format_func=lambda v: "not coded" if v == "" else v,
                 horizontal=True,
             )
 
