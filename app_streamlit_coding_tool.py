@@ -108,6 +108,22 @@ def _reset_navigation_if_needed(df: pd.DataFrame):
 # -----------------------------
 # UI
 # -----------------------------
+st.markdown(
+    """
+    <style>
+    /* De-emphasize the blank ("—") option, which is always first in LABEL_OPTIONS */
+    div[data-testid="stRadio"] label:first-of-type > div:first-of-type {
+        opacity: 0.35;
+    }
+    div[data-testid="stRadio"] label:first-of-type p {
+        opacity: 0.35;
+        font-size: 0.85em;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("AI Response Coding Tool (Free-text coding)")
 
 with st.sidebar:
@@ -257,7 +273,7 @@ for row_cols in (LABEL_COLS[:half], LABEL_COLS[half:]):
                 c,
                 options=LABEL_OPTIONS,
                 key=f"in_{c}",
-                format_func=lambda v: "not coded" if v == "" else v,
+                format_func=lambda v: "—" if v == "" else v,
                 horizontal=True,
             )
 
