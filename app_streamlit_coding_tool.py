@@ -258,6 +258,7 @@ for row_cols in (LABEL_COLS[:half], LABEL_COLS[half:]):
                 options=LABEL_OPTIONS,
                 key=f"in_{c}",
                 format_func=lambda v: "—" if v == "" else v,
+                horizontal=True,
             )
 
 st.markdown("---")
