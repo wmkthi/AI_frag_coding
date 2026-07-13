@@ -144,12 +144,6 @@ df: pd.DataFrame = st.session_state.df
 _reset_navigation_if_needed(df)
 idx = st.session_state.row_idx
 
-# Top preview
-st.subheader("Preview (first 10 rows)")
-st.dataframe(df.head(10), use_container_width=True)
-
-st.markdown("---")
-
 # Navigation controls
 nav1, nav2, nav3, nav4, nav5 = st.columns([1, 1, 2, 1, 1], vertical_alignment="center")
 
@@ -254,15 +248,17 @@ if st.session_state.get("last_row_idx_for_inputs") != idx:
 
 st.caption("Leave blank if not yet coded.")
 
-label_cols_ui = st.columns(len(LABEL_COLS), gap="small")
-for col, c in zip(label_cols_ui, LABEL_COLS):
-    with col:
-        st.radio(
-            c,
-            options=LABEL_OPTIONS,
-            key=f"in_{c}",
-            format_func=lambda v: "—" if v == "" else v,
-        )
+half = (len(LABEL_COLS) + 1) // 2
+for row_cols in (LABEL_COLS[:half], LABEL_COLS[half:]):
+    row_ui = st.columns(len(row_cols), gap="small")
+    for col, c in zip(row_ui, row_cols):
+        with col:
+            st.radio(
+                c,
+                options=LABEL_OPTIONS,
+                key=f"in_{c}",
+                format_func=lambda v: "—" if v == "" else v,
+            )
 
 st.markdown("---")
 
@@ -285,6 +281,10 @@ with copy_col:
         _write_row_from_session(df, idx)
         st.success("Copied previous row's codes.")
         st.rerun()
+
+st.markdown("---")
+st.subheader("Preview (first 10 rows)")
+st.dataframe(df.head(10), use_container_width=True)
 
 # -----------------------------
 # Download section (sidebar)
