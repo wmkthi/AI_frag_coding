@@ -44,6 +44,13 @@ def _ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
     for c in TEXT_COLS:
         if c not in df.columns:
             df[c] = ""
+    # Cast editable columns to object dtype so string writes (e.g. "0"/"1"/"")
+    # don't fail against a numeric dtype inferred from the source file
+    editable_cols = list(LABEL_COLS)
+    if "Notes" in df.columns:
+        editable_cols.append("Notes")
+    for c in editable_cols:
+        df[c] = df[c].astype(object).where(df[c].notna(), "")
     return df
 
 
