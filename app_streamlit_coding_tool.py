@@ -300,7 +300,7 @@ idx = st.session_state.row_idx
 nav1, nav2, nav3, nav4, nav5 = st.columns([1, 1, 2, 1, 1], vertical_alignment="center")
 
 with nav1:
-    if st.button("⬅ Prev", use_container_width=True, disabled=(idx <= 0)):
+    if st.button("⬅ Prev", width="stretch", disabled=(idx <= 0)):
         _write_row_from_session(df, idx)
         st.session_state.row_idx = idx - 1
         _sync_session_from_df(df, st.session_state.row_idx)
@@ -308,7 +308,7 @@ with nav1:
         st.rerun()
 
 with nav2:
-    if st.button("Next ➡", use_container_width=True, disabled=(idx >= len(df) - 1)):
+    if st.button("Next ➡", width="stretch", disabled=(idx >= len(df) - 1)):
         _write_row_from_session(df, idx)
         st.session_state.row_idx = idx + 1
         _sync_session_from_df(df, st.session_state.row_idx)
@@ -400,6 +400,19 @@ if st.session_state.get("last_row_idx_for_inputs") != idx:
     _sync_session_from_df(df, idx)
     st.session_state.last_row_idx_for_inputs = idx
 
+# Apply any pending Clear/Copy action *before* the radios below are
+# instantiated. Streamlit forbids writing to a widget's session_state key
+# after that widget has already been created in the same run, so "Clear
+# all" / "Copy prev row codes" can't set st.session_state["in_..."]
+# directly from below the radios — they set this flag instead and rerun.
+pending_action = st.session_state.pop("pending_label_action", None)
+if pending_action == "clear":
+    for c in LABEL_COLS:
+        st.session_state[f"in_{c}"] = ""
+elif pending_action == "copy_prev" and idx > 0:
+    for c in LABEL_COLS:
+        st.session_state[f"in_{c}"] = _safe_cell_as_string(df.loc[idx - 1, c])
+
 st.caption("Leave blank if not yet coded. Your picks save automatically.")
 
 half = (len(LABEL_COLS) + 1) // 2
@@ -423,23 +436,17 @@ st.markdown("---")
 
 clear_col, copy_col = st.columns(2)
 with clear_col:
-    if st.button("Clear all", use_container_width=True):
-        for c in LABEL_COLS:
-            st.session_state[f"in_{c}"] = ""
-        _write_row_from_session(df, idx)
-        st.success("Cleared codes for this row.")
+    if st.button("Clear all", width="stretch"):
+        st.session_state.pending_label_action = "clear"
         st.rerun()
 with copy_col:
-    if st.button("Copy prev row codes", use_container_width=True, disabled=(idx <= 0)):
-        for c in LABEL_COLS:
-            st.session_state[f"in_{c}"] = _safe_cell_as_string(df.loc[idx - 1, c])
-        _write_row_from_session(df, idx)
-        st.success("Copied previous row's codes.")
+    if st.button("Copy prev row codes", width="stretch", disabled=(idx <= 0)):
+        st.session_state.pending_label_action = "copy_prev"
         st.rerun()
 
 st.markdown("---")
 st.subheader("Preview (first 10 rows)")
-st.dataframe(df.head(10), use_container_width=True)
+st.dataframe(df.head(10), width="stretch")
 
 # -----------------------------
 # Download section (sidebar)
@@ -462,7 +469,7 @@ with st.sidebar:
         data=excel_buf,
         file_name=f"{base}_coded.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
+        width="stretch",
     )
 
     # CSV download
@@ -472,7 +479,7 @@ with st.sidebar:
         data=csv_bytes,
         file_name=f"{base}_coded.csv",
         mime="text/csv",
-        use_container_width=True,
+        width="stretch",
     )
 
 st.caption(
