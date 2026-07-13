@@ -2,5 +2,3 @@ streamlit >= 1.0
 pandas >= 1.0
 openpyxl >= 3.0
 gspread == 6.1.4
-google-auth == 2.35.0
-cryptography == 43.0.3
