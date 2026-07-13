@@ -27,7 +27,9 @@ LABEL_COLS = [
     "ViolationFlag",
 ]
 
-TEXT_COLS = ["previous_conversation", "current_user_turn", "ai_response"]
+TEXT_COLS = ["context", "current_user_turn", "ai_turn"]
+
+LABEL_OPTIONS = ["", "0", "1"]
 
 
 # -----------------------------
@@ -68,6 +70,8 @@ def _safe_cell_as_string(x) -> str:
     """
     if pd.isna(x):
         return ""
+    if isinstance(x, float) and x.is_integer():
+        return str(int(x))
     return str(x)
 
 
@@ -192,13 +196,14 @@ left, right = st.columns([2.2, 1.2], gap="large")
 with left:
     st.subheader(f"Row {idx+1} of {len(df)}")
 
-    if "id" in df.columns:
-        st.caption(f"id: {_safe_text(df.loc[idx, 'id'])}")
+    id_col = "ID" if "ID" in df.columns else ("id" if "id" in df.columns else None)
+    if id_col:
+        st.caption(f"{id_col}: {_safe_text(df.loc[idx, id_col])}")
 
-    st.markdown("#### previous_conversation")
+    st.markdown("#### context (previous conversation)")
     st.text_area(
-        label="previous_conversation",
-        value=_safe_text(df.loc[idx, "previous_conversation"]),
+        label="context",
+        value=_safe_text(df.loc[idx, "context"]),
         height=220,
         disabled=True,
     )
@@ -211,10 +216,10 @@ with left:
         disabled=True,
     )
 
-    st.markdown("#### ai_response")
+    st.markdown("#### ai_turn (AI response)")
     st.text_area(
-        label="ai_response",
-        value=_safe_text(df.loc[idx, "ai_response"]),
+        label="ai_turn",
+        value=_safe_text(df.loc[idx, "ai_turn"]),
         height=220,
         disabled=True,
     )
@@ -237,10 +242,10 @@ with right:
         _sync_session_from_df(df, idx)
         st.session_state.last_row_idx_for_inputs = idx
 
-    st.caption("Leave blank if not applicable. Your exact text is saved into the cell.")
+    st.caption("Leave blank if not yet coded. Choose 0 or 1 for each category.")
 
     for c in LABEL_COLS:
-        st.text_input(c, key=f"in_{c}")
+        st.selectbox(c, options=LABEL_OPTIONS, key=f"in_{c}")
 
     st.markdown("---")
 
