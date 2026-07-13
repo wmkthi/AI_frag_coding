@@ -44,13 +44,15 @@ def _ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
     for c in TEXT_COLS:
         if c not in df.columns:
             df[c] = ""
-    # Cast editable columns to object dtype so string writes (e.g. "0"/"1"/"")
-    # don't fail against a numeric dtype inferred from the source file
+    # Normalize editable columns to plain strings (e.g. 1.0 -> "1", NaN -> "").
+    # A numeric dtype inferred from the source file would reject later string
+    # writes ("0"/"1"/""), and a mixed float/str object column breaks Arrow
+    # serialization for the preview table.
     editable_cols = list(LABEL_COLS)
     if "Notes" in df.columns:
         editable_cols.append("Notes")
     for c in editable_cols:
-        df[c] = df[c].astype(object).where(df[c].notna(), "")
+        df[c] = df[c].apply(_safe_cell_as_string)
     return df
 
 
@@ -198,23 +200,23 @@ with nav5:
 st.markdown("---")
 
 # Main content area
-left, right = st.columns([2.2, 1.2], gap="large")
+st.subheader(f"Row {idx+1} of {len(df)}")
 
-with left:
-    st.subheader(f"Row {idx+1} of {len(df)}")
+id_col = "ID" if "ID" in df.columns else ("id" if "id" in df.columns else None)
+if id_col:
+    st.caption(f"{id_col}: {_safe_text(df.loc[idx, id_col])}")
 
-    id_col = "ID" if "ID" in df.columns else ("id" if "id" in df.columns else None)
-    if id_col:
-        st.caption(f"{id_col}: {_safe_text(df.loc[idx, id_col])}")
+st.markdown("#### context (previous conversation)")
+st.text_area(
+    label="context",
+    value=_safe_text(df.loc[idx, "context"]),
+    height=220,
+    disabled=True,
+)
 
-    st.markdown("#### context (previous conversation)")
-    st.text_area(
-        label="context",
-        value=_safe_text(df.loc[idx, "context"]),
-        height=220,
-        disabled=True,
-    )
+turn_left, turn_right = st.columns(2, gap="large")
 
+with turn_left:
     st.markdown("#### current_user_turn")
     st.text_area(
         label="current_user_turn",
@@ -223,59 +225,66 @@ with left:
         disabled=True,
     )
 
+with turn_right:
     st.markdown("#### ai_turn (AI response)")
     st.text_area(
         label="ai_turn",
         value=_safe_text(df.loc[idx, "ai_turn"]),
-        height=220,
+        height=160,
         disabled=True,
     )
 
-    if "Notes" in df.columns:
-        st.markdown("#### Notes (editable)")
-        new_notes = st.text_area(
-            label="Notes",
-            value=_safe_text(df.loc[idx, "Notes"]),
-            height=120,
-            key="ta_notes_edit",
+if "Notes" in df.columns:
+    st.markdown("#### Notes (editable)")
+    new_notes = st.text_area(
+        label="Notes",
+        value=_safe_text(df.loc[idx, "Notes"]),
+        height=100,
+        key="ta_notes_edit",
+    )
+    df.at[idx, "Notes"] = new_notes
+
+st.markdown("---")
+st.subheader("Coding values")
+
+# Ensure inputs match current row when row changes
+if st.session_state.get("last_row_idx_for_inputs") != idx:
+    _sync_session_from_df(df, idx)
+    st.session_state.last_row_idx_for_inputs = idx
+
+st.caption("Leave blank if not yet coded.")
+
+label_cols_ui = st.columns(len(LABEL_COLS), gap="small")
+for col, c in zip(label_cols_ui, LABEL_COLS):
+    with col:
+        st.radio(
+            c,
+            options=LABEL_OPTIONS,
+            key=f"in_{c}",
+            format_func=lambda v: "—" if v == "" else v,
         )
-        df.at[idx, "Notes"] = new_notes
 
-with right:
-    st.subheader("Coding values (type anything)")
+st.markdown("---")
 
-    # Ensure right-side inputs match current row when row changes
-    if st.session_state.get("last_row_idx_for_inputs") != idx:
-        _sync_session_from_df(df, idx)
-        st.session_state.last_row_idx_for_inputs = idx
-
-    st.caption("Leave blank if not yet coded. Choose 0 or 1 for each category.")
-
-    for c in LABEL_COLS:
-        st.selectbox(c, options=LABEL_OPTIONS, key=f"in_{c}")
-
-    st.markdown("---")
-
-    if st.button("💾 Save row (right)", use_container_width=True):
+save_col, clear_col, copy_col = st.columns(3)
+with save_col:
+    if st.button("💾 Save this row", use_container_width=True):
         _write_row_from_session(df, idx)
         st.success(f"Saved row {idx+1}.")
-
-    st.markdown("**Quick actions**")
-    colA, colB = st.columns(2)
-    with colA:
-        if st.button("Clear all", use_container_width=True):
-            for c in LABEL_COLS:
-                st.session_state[f"in_{c}"] = ""
-            _write_row_from_session(df, idx)
-            st.success("Cleared codes for this row.")
-            st.rerun()
-    with colB:
-        if st.button("Copy prev row codes", use_container_width=True, disabled=(idx <= 0)):
-            for c in LABEL_COLS:
-                st.session_state[f"in_{c}"] = _safe_cell_as_string(df.loc[idx - 1, c])
-            _write_row_from_session(df, idx)
-            st.success("Copied previous row's codes.")
-            st.rerun()
+with clear_col:
+    if st.button("Clear all", use_container_width=True):
+        for c in LABEL_COLS:
+            st.session_state[f"in_{c}"] = ""
+        _write_row_from_session(df, idx)
+        st.success("Cleared codes for this row.")
+        st.rerun()
+with copy_col:
+    if st.button("Copy prev row codes", use_container_width=True, disabled=(idx <= 0)):
+        for c in LABEL_COLS:
+            st.session_state[f"in_{c}"] = _safe_cell_as_string(df.loc[idx - 1, c])
+        _write_row_from_session(df, idx)
+        st.success("Copied previous row's codes.")
+        st.rerun()
 
 # -----------------------------
 # Download section (sidebar)
