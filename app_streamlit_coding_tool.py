@@ -10,9 +10,6 @@ import io
 import re
 import pandas as pd
 import streamlit as st
-import gspread
-from google.oauth2.service_account import Credentials
-from gspread.exceptions import WorksheetNotFound
 
 st.set_page_config(page_title="AI Response Coding Tool", layout="wide")
 
@@ -33,15 +30,6 @@ LABEL_COLS = [
 TEXT_COLS = ["context", "current_user_turn", "ai_turn"]
 
 LABEL_OPTIONS = ["", "0", "1"]
-
-# Google Sheets used as durable storage for coding progress, so that a
-# Streamlit Cloud timeout/restart (which wipes session state and any
-# uploaded-but-undownloaded file) never loses coded rows. Requires two
-# entries in Streamlit secrets:
-#   [gcp_service_account]   <- full service-account JSON key, as a TOML table
-#   gsheet_id = "..."       <- the spreadsheet ID from its URL
-GSHEET_WORKSHEET_NAME = "coding_progress"
-GSHEET_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 
 # -----------------------------
@@ -104,114 +92,13 @@ def _id_col(df: pd.DataFrame):
     return None
 
 
-def _gsheet_configured() -> bool:
-    # st.secrets raises if no secrets.toml exists at all (not just a KeyError
-    # for a missing key), which would otherwise crash the app pre-setup.
-    try:
-        return "gcp_service_account" in st.secrets and "gsheet_id" in st.secrets
-    except Exception:
-        return False
-
-
-@st.cache_resource(show_spinner=False)
-def _get_gsheet_worksheet():
-    """Authorize with the service account and return the worksheet used to
-    persist coding progress, creating it (with a header row) if needed."""
-    creds = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"], scopes=GSHEET_SCOPES
-    )
-    client = gspread.authorize(creds)
-    spreadsheet = client.open_by_key(st.secrets["gsheet_id"])
-    try:
-        ws = spreadsheet.worksheet(GSHEET_WORKSHEET_NAME)
-    except WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(title=GSHEET_WORKSHEET_NAME, rows=2000, cols=20)
-        ws.append_row(["ID"] + LABEL_COLS + ["Notes"])
-    return ws
-
-
-def _apply_gsheet_progress(df: pd.DataFrame, id_col: str):
-    """Overlay any previously-saved codes from the Google Sheet onto df.
-    Lets coding progress survive a Streamlit Cloud timeout/restart, which
-    wipes session state, as long as the same file is re-uploaded afterward."""
-    if not id_col or not _gsheet_configured():
-        return
-    try:
-        ws = _get_gsheet_worksheet()
-        records = ws.get_all_records()
-    except Exception as e:
-        st.sidebar.warning(f"Could not load saved progress from Google Sheets: {e}")
-        return
-
-    id_to_idx = {str(df.loc[i, id_col]).strip(): i for i in range(len(df))}
-    for rec in records:
-        row_id = str(rec.get("ID", "")).strip()
-        i = id_to_idx.get(row_id)
-        if i is None:
-            continue
-        for c in LABEL_COLS:
-            val = str(rec.get(c, "")).strip()
-            if val:
-                df.at[i, c] = val
-        if "Notes" in df.columns:
-            notes_val = str(rec.get("Notes", "")).strip()
-            if notes_val:
-                df.at[i, "Notes"] = notes_val
-
-
-def _save_row_to_gsheet(df: pd.DataFrame, idx: int, id_col: str):
-    """Upsert the current row's codes into the Google Sheet by ID."""
-    if not id_col or not _gsheet_configured():
-        return
-    row_id = str(df.loc[idx, id_col]).strip()
-    if not row_id:
-        return
-    values = (
-        [row_id]
-        + [str(df.loc[idx, c]) for c in LABEL_COLS]
-        + [str(df.loc[idx, "Notes"]) if "Notes" in df.columns else ""]
-    )
-
-    try:
-        ws = _get_gsheet_worksheet()
-        id_map = st.session_state.setdefault("gsheet_id_row_map", {})
-        if not id_map:
-            for i, v in enumerate(ws.col_values(1)[1:], start=2):
-                id_map[v.strip()] = i
-
-        if row_id in id_map:
-            ws.update(f"A{id_map[row_id]}", [values])
-        else:
-            ws.append_row(values)
-            id_map[row_id] = len(ws.col_values(1))
-    except Exception as e:
-        st.sidebar.warning(f"Auto-save to Google Sheets failed for row {idx+1}: {e}")
-
-
-def _maybe_sync_row_to_gsheet(df: pd.DataFrame, idx: int, id_col: str):
-    """Push the row to Google Sheets only if its coded values actually
-    changed since the last sync, to avoid a network call on every rerun."""
-    if not id_col or not _gsheet_configured():
-        return
-    current = tuple(str(df.loc[idx, c]) for c in LABEL_COLS)
-    if "Notes" in df.columns:
-        current += (str(df.loc[idx, "Notes"]),)
-    synced = st.session_state.setdefault("gsheet_synced_values", {})
-    if synced.get(idx) == current:
-        return
-    _save_row_to_gsheet(df, idx, id_col)
-    synced[idx] = current
-
-
 def _write_row_from_session(df: pd.DataFrame, idx: int):
-    """Write current text-input states into df exactly as typed (blank => blank),
-    then auto-save the row to Google Sheets if configured."""
+    """Write current text-input states into df exactly as typed (blank => blank)."""
     for c in LABEL_COLS:
         key = f"in_{c}"
         val = st.session_state.get(key, "")
         # Keep blank as blank; otherwise store as-is (string)
         df.at[idx, c] = val if str(val).strip() != "" else ""
-    _maybe_sync_row_to_gsheet(df, idx, _id_col(df))
 
 
 def _sync_session_from_df(df: pd.DataFrame, idx: int):
@@ -247,21 +134,13 @@ st.markdown(
 
 st.title("AI Response Coding Tool (Free-text coding)")
 
-if not _gsheet_configured():
-    st.warning(
-        "Google Sheets auto-save is not configured (missing `gcp_service_account` / "
-        "`gsheet_id` in Streamlit secrets). Codes will only live in this browser "
-        "session and will be lost on a timeout until you download a copy.",
-        icon="⚠️",
-    )
-
 with st.sidebar:
     st.header("1) Upload your file")
     uploaded = st.file_uploader("Upload CSV or Excel", type=["csv", "xlsx", "xls"])
 
     st.markdown("---")
     st.header("2) Download")
-    st.caption("Codes auto-save to Google Sheets as you go. Download here for a local copy.")
+    st.caption("After coding, download an updated copy of your file.")
 
 if not uploaded:
     st.info("Upload a CSV/XLSX to start coding.")
@@ -277,16 +156,9 @@ if "df" not in st.session_state or st.session_state.get("loaded_filename") != up
 
     df = _ensure_columns(df)
 
-    # Restore any codes already saved to Google Sheets from a prior session
-    # (e.g. after a Streamlit Cloud timeout wiped this session's state).
-    with st.spinner("Checking Google Sheets for previously saved codes..."):
-        _apply_gsheet_progress(df, _id_col(df))
-
     st.session_state.df = df
     st.session_state.loaded_filename = uploaded.name
     st.session_state.row_idx = 0
-    st.session_state.gsheet_id_row_map = {}
-    st.session_state.gsheet_synced_values = {}
 
     # Initialize inputs from first row
     _sync_session_from_df(df, 0)
@@ -331,10 +203,9 @@ with nav3:
         st.rerun()
 
 with nav4:
-    if _gsheet_configured():
-        st.caption("✅ Auto-saving to Google Sheets")
-    else:
-        st.caption("⚠️ Auto-save not configured")
+    if st.button("💾 Save row", width="stretch"):
+        _write_row_from_session(df, idx)
+        st.success(f"Saved row {idx+1}.")
 
 with nav5:
     # Count rows where any label cell is non-empty
@@ -390,7 +261,6 @@ if "Notes" in df.columns:
         key="ta_notes_edit",
     )
     df.at[idx, "Notes"] = new_notes
-    _maybe_sync_row_to_gsheet(df, idx, id_col)
 
 st.markdown("---")
 st.subheader("Coding values")
@@ -409,11 +279,13 @@ pending_action = st.session_state.pop("pending_label_action", None)
 if pending_action == "clear":
     for c in LABEL_COLS:
         st.session_state[f"in_{c}"] = ""
+    _write_row_from_session(df, idx)
 elif pending_action == "copy_prev" and idx > 0:
     for c in LABEL_COLS:
         st.session_state[f"in_{c}"] = _safe_cell_as_string(df.loc[idx - 1, c])
+    _write_row_from_session(df, idx)
 
-st.caption("Leave blank if not yet coded. Your picks save automatically.")
+st.caption("Leave blank if not yet coded.")
 
 half = (len(LABEL_COLS) + 1) // 2
 for row_cols in (LABEL_COLS[:half], LABEL_COLS[half:]):
@@ -428,13 +300,13 @@ for row_cols in (LABEL_COLS[:half], LABEL_COLS[half:]):
                 horizontal=True,
             )
 
-# Every rerun (including one triggered by clicking a radio above) flushes
-# the current picks into df and, if configured, syncs them to Google Sheets.
-_write_row_from_session(df, idx)
-
 st.markdown("---")
 
-clear_col, copy_col = st.columns(2)
+save_col, clear_col, copy_col = st.columns(3)
+with save_col:
+    if st.button("💾 Save this row", width="stretch"):
+        _write_row_from_session(df, idx)
+        st.success(f"Saved row {idx+1}.")
 with clear_col:
     if st.button("Clear all", width="stretch"):
         st.session_state.pending_label_action = "clear"
@@ -454,7 +326,10 @@ st.dataframe(df.head(10), width="stretch")
 with st.sidebar:
     st.markdown("---")
     st.subheader("Download updated file")
-    st.caption("Reflects your latest picks automatically — no need to save first.")
+
+    if st.button("Prepare download (save current row)"):
+        _write_row_from_session(df, idx)
+        st.success("Saved current row changes.")
 
     # Excel download
     excel_buf = io.BytesIO()
@@ -482,10 +357,4 @@ with st.sidebar:
         width="stretch",
     )
 
-st.caption(
-    "Tip: every pick auto-saves to Google Sheets as soon as you make it — "
-    "no need to click Save, and progress survives a session timeout."
-    if _gsheet_configured()
-    else "Tip: Google Sheets auto-save isn't configured, so download a copy "
-    "periodically to avoid losing progress on a timeout."
-)
+st.caption("Tip: Use Save row before navigating if you want to be extra safe (navigation also saves automatically).")
